@@ -19,7 +19,7 @@
 <body>
 <h1>~ axolotl run ~</h1>
 <div id="wrap"><canvas id="c" width="800" height="300"></canvas></div>
-<p class="hint">space / tap to swim up &nbsp;·&nbsp; dodge the coral, duck the jellyfish<br>
+<p class="hint">space / tap = jump &nbsp;·&nbsp; hold ↓ / swipe down = duck &nbsp;·&nbsp; jump coral, duck jellyfish<br>
 made with 🩷 by <a href="https://github.com/sarinadfernandez-create">sarina</a></p>
 <script>
 (() => {
@@ -28,53 +28,79 @@ const W = 800, H = 300, GROUND = 252;
 
 // ---------- state ----------
 let mode = 'start';            // start | play | dead
-let t = 0, speed = 4.2, dist = 0, score = 0, best = 0;
+let t = 0, speed = 3.6, dist = 0, score = 0, best = 0;
 try { best = +localStorage.getItem('axo-best') || 0; } catch(e) {}
 
-const axo = { x: 110, y: GROUND, vy: 0, w: 74, h: 34 };
-let obstacles = [], bubbles = [], nextSpawn = 0;
+const axo = { x: 110, y: GROUND, vy: 0, w: 40, h: 58, duck: false };
+let obstacles = [], bubbles = [], nextSpawn = 0, duckTimer = null;
 
 function reset() {
-  t = 0; speed = 4.2; dist = 0; score = 0;
-  axo.y = GROUND; axo.vy = 0;
-  obstacles = []; nextSpawn = 90;
+  t = 0; speed = 3.6; dist = 0; score = 0;
+  axo.y = GROUND; axo.vy = 0; axo.duck = false;
+  obstacles = []; nextSpawn = 120;
 }
 
 // ---------- input ----------
 function jump() {
   if (mode === 'start') { mode = 'play'; reset(); return; }
   if (mode === 'dead')  { mode = 'play'; reset(); return; }
-  if (axo.y >= GROUND - 0.5) axo.vy = -11.6;
+  if (axo.y >= GROUND - 0.5 && !axo.duck) axo.vy = -11.6;
 }
 addEventListener('keydown', e => {
   if (e.code === 'Space' || e.code === 'ArrowUp') { e.preventDefault(); jump(); }
+  if (e.code === 'ArrowDown' || e.code === 'KeyS') { e.preventDefault(); if (axo.y >= GROUND - 0.5) axo.duck = true; }
 });
-cv.addEventListener('pointerdown', jump);
+addEventListener('keyup', e => {
+  if (e.code === 'ArrowDown' || e.code === 'KeyS') axo.duck = false;
+});
+// touch / mouse: tap = jump, swipe down = duck for a moment
+let pStart = null;
+cv.addEventListener('pointerdown', e => { pStart = { y: e.clientY, t: performance.now() }; });
+cv.addEventListener('pointerup', e => {
+  if (!pStart) return;
+  const dy = e.clientY - pStart.y;
+  pStart = null;
+  if (dy > 25) {                       // swipe down → duck ~700ms
+    if (axo.y >= GROUND - 0.5) {
+      axo.duck = true;
+      clearTimeout(duckTimer);
+      duckTimer = setTimeout(() => { axo.duck = false; }, 700);
+    }
+  } else jump();
+});
 
 // ---------- spawning ----------
 function spawn() {
   const late = score > 250 && Math.random() < 0.3;
-  if (late) {              // jellyfish — floats at head height, do NOT jump
-    obstacles.push({ kind: 'jelly', x: W + 40, y: 165 + Math.random() * 20, r: 20, bob: Math.random() * 6 });
-  } else {                 // coral cluster on the seafloor
-    const h = 34 + Math.random() * 26, w = 30 + Math.random() * 22;
+  if (late) {              // jellyfish — head height with long tentacles: duck under it!
+    obstacles.push({ kind: 'jelly', x: W + 40, y: 148 + Math.random() * 10, r: 18, bob: Math.random() * 6 });
+  } else {                 // coral cluster — starts small, grows as you score
+    const grow = Math.min(1, score / 500);
+    const h = 28 + Math.random() * 16 + grow * 18, w = 26 + Math.random() * 14 + grow * 14;
     obstacles.push({ kind: 'coral', x: W + 40, y: GROUND, w, h,
       hue: Math.random() < 0.5 ? '#ff7f66' : '#ff5e7e' });
   }
-  nextSpawn = 55 + Math.random() * 65 + Math.max(0, 40 - speed * 4);
+  nextSpawn = 75 + Math.random() * 75 + Math.max(0, 55 - speed * 5);
 }
 
 // ---------- collision ----------
 function hit() {
-  const ax = axo.x - 26, ay = axo.y - axo.h + 6, aw = 52, ah = axo.h - 8;
+  const ducking = axo.duck && axo.y >= GROUND - 0.5;
+  const ax = axo.x - 16, aw = 32;
+  const ay = ducking ? GROUND - 12 : axo.y - axo.h + 6;
+  const ah = ducking ? 12 : axo.h - 8;
   for (const o of obstacles) {
     if (o.kind === 'coral') {
       const ox = o.x - o.w / 2 + 5, oy = o.y - o.h + 4, ow = o.w - 10, oh = o.h - 4;
       if (ax < ox + ow && ax + aw > ox && ay < oy + oh && ay + ah > oy) return true;
     } else {
-      const jy = o.y + Math.sin(t / 14 + o.bob) * 8;
+      const jy = o.y + Math.sin(t / 14 + o.bob) * 4;
+      // bell
       const cx = Math.max(ax, Math.min(o.x, ax + aw)), cy = Math.max(ay, Math.min(jy, ay + ah));
-      if ((cx - o.x) ** 2 + (cy - jy) ** 2 < (o.r - 4) ** 2) return true;
+      if ((cx - o.x) ** 2 + (cy - jy) ** 2 < 18 * 18) return true;
+      // tentacles — column trailing below the bell
+      const tx = o.x - 12, tw = 24, ty = jy + 10, th = 62;
+      if (ax < tx + tw && ax + aw > tx && ay < ty + th && ay + ah > ty) return true;
     }
   }
   return false;
@@ -135,52 +161,54 @@ function drawAxo() {
   const wig = Math.sin(t / 3.2) * (grounded && mode === 'play' ? 1 : 0.4);
   const x = axo.x, y = axo.y;
   ctx.save(); ctx.translate(x, y);
+  if (axo.duck && grounded) ctx.scale(1.2, 0.26);   // squish flat against the sand
 
-  // tail (behind body, wagging)
-  ctx.save(); ctx.translate(-34, -16); ctx.rotate(wig * 0.18);
+  // tail — curls out behind at the base
+  ctx.save(); ctx.translate(-12, -6); ctx.rotate(wig * 0.1);
   ctx.fillStyle = '#ff9fbe';
-  ctx.beginPath(); ctx.moveTo(0, -8);
-  ctx.quadraticCurveTo(-30, -20 + wig * 4, -40, 0 + wig * 3);
-  ctx.quadraticCurveTo(-30, 14 + wig * 3, 0, 8); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(0, -6);
+  ctx.quadraticCurveTo(-26, -14 + wig * 3, -34, 2 + wig * 2);
+  ctx.quadraticCurveTo(-24, 10, 0, 6); ctx.fill();
   ctx.restore();
 
-  // back leg
-  leg(-16, 0, wig * 8);
-  // body capsule
+  // feet (little run shuffle)
+  ctx.fillStyle = '#ff9fbe';
+  rr(-15 + wig * 2, -9, 12, 9, 4);
+  rr(3 - wig * 2, -9, 12, 9, 4);
+  // body — upright capsule
   ctx.fillStyle = '#ffb1c8';
-  rr(-36, -30, 62, 30, 14);
+  rr(-17, -56, 34, 52, 16);
   // belly
   ctx.fillStyle = '#ffd4e0';
-  rr(-30, -14, 48, 12, 6);
+  rr(-11, -37, 22, 29, 10);
+  // arms — stubby, swinging
+  ctx.save(); ctx.translate(-15, -40); ctx.rotate(-0.45 + wig * 0.12);
+  ctx.fillStyle = '#ff9fbe'; rr(-3, 0, 7, 15, 3.5); ctx.restore();
+  ctx.save(); ctx.translate(15, -40); ctx.rotate(0.45 - wig * 0.12);
+  ctx.fillStyle = '#ff9fbe'; rr(-4, 0, 7, 15, 3.5); ctx.restore();
   // head
   ctx.fillStyle = '#ffb1c8';
-  ctx.beginPath(); ctx.arc(30, -18, 21, 0, 7); ctx.fill();
-  // gills — three fronds, wiggling
+  ctx.beginPath(); ctx.arc(2, -66, 19, 0, 7); ctx.fill();
+  // gills — three fronds fanning from the back of the head, wiggling
   ctx.fillStyle = '#ff5c8a';
-  for (const [ang, len] of [[-1.9, 16], [-2.5, 18], [-3.1, 15]]) {
-    ctx.save(); ctx.translate(18, -30); ctx.rotate(ang + wig * 0.08);
-    ctx.beginPath(); ctx.ellipse(len / 2 + 4, 0, len / 2 + 4, 4.5, 0, 0, 7); ctx.fill();
+  for (const [ang, len] of [[-1.5, 14], [-2.1, 17], [-2.7, 14]]) {
+    ctx.save(); ctx.translate(-8, -76); ctx.rotate(ang + wig * 0.08);
+    ctx.beginPath(); ctx.ellipse(len / 2 + 4, 0, len / 2 + 4, 4.2, 0, 0, 7); ctx.fill();
     ctx.restore();
   }
-  // front leg
-  leg(16, 0, -wig * 8);
-  // eye + glint
+  // eye + glint (facing right)
   ctx.fillStyle = '#2b2b3a';
-  ctx.beginPath(); ctx.arc(37, -21, 4.4, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.arc(10, -69, 4.4, 0, 7); ctx.fill();
   ctx.fillStyle = '#fff';
-  ctx.beginPath(); ctx.arc(38.6, -22.6, 1.6, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.arc(11.6, -70.6, 1.6, 0, 7); ctx.fill();
   // blush
   ctx.fillStyle = 'rgba(255,110,150,.55)';
-  ctx.beginPath(); ctx.ellipse(41, -12, 5, 3, 0, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(13, -60, 5, 3, 0, 0, 7); ctx.fill();
   // smile
   ctx.strokeStyle = '#c2557d'; ctx.lineWidth = 1.6;
-  ctx.beginPath(); ctx.arc(44, -15, 5, 0.3, 1.6); ctx.stroke();
+  ctx.beginPath(); ctx.arc(15, -63, 5, 0.3, 1.6); ctx.stroke();
   ctx.restore();
 
-  function leg(lx, ly, swing) {
-    ctx.save(); ctx.translate(lx, ly - 4); ctx.rotate(swing * 0.03);
-    ctx.fillStyle = '#ff9fbe'; rr(-4, 0, 9, 10, 4); ctx.restore();
-  }
   function rr(a, b, w2, h2, r) { ctx.beginPath(); ctx.roundRect(a, b, w2, h2, r); ctx.fill(); }
 }
 
@@ -198,19 +226,21 @@ function drawObstacles() {
       }
       ctx.restore();
     } else {
-      const jy = o.y + Math.sin(t / 14 + o.bob) * 8;
+      const jy = o.y + Math.sin(t / 14 + o.bob) * 4;
       ctx.save(); ctx.translate(o.x, jy);
-      ctx.fillStyle = 'rgba(190,150,255,.85)';
+      // long trailing tentacles (drawn first, behind the bell)
+      ctx.strokeStyle = 'rgba(190,150,255,.65)'; ctx.lineWidth = 3; ctx.lineCap = 'round';
+      for (let i = -2; i <= 2; i++) {
+        ctx.beginPath(); ctx.moveTo(i * 6, 8);
+        ctx.quadraticCurveTo(i * 6 + Math.sin(t / 9 + i) * 6, 45, i * 6 + Math.sin(t / 7 + i * 2) * 8, 80);
+        ctx.stroke();
+      }
+      // bell
+      ctx.fillStyle = 'rgba(190,150,255,.9)';
       ctx.beginPath(); ctx.arc(0, 0, o.r, Math.PI, 0);
       ctx.quadraticCurveTo(o.r, o.r * 0.5, o.r * 0.8, o.r * 0.55);
       for (let i = 3; i >= -3; i--) ctx.lineTo(i * o.r / 4, o.r * (i % 2 ? 0.35 : 0.55));
       ctx.closePath(); ctx.fill();
-      ctx.strokeStyle = 'rgba(190,150,255,.6)'; ctx.lineWidth = 2;
-      for (let i = -1; i <= 1; i++) {
-        ctx.beginPath(); ctx.moveTo(i * 8, o.r * 0.5);
-        ctx.quadraticCurveTo(i * 8 + Math.sin(t / 8) * 5, o.r + 10, i * 8, o.r + 20);
-        ctx.stroke();
-      }
       ctx.fillStyle = '#2b2b3a';
       ctx.beginPath(); ctx.arc(-6, -4, 2.2, 0, 7); ctx.arc(6, -4, 2.2, 0, 7); ctx.fill();
       ctx.restore();
@@ -226,7 +256,7 @@ function ui() {
   ctx.fillText(`best ${best}`, W - 18, 52);
   ctx.textAlign = 'center';
   if (mode === 'start') {
-    panel('🌊  axolotl run  🌊', 'space or tap to swim — dodge coral, duck jellyfish');
+    panel('🌊  axolotl run  🌊', 'space/tap = jump · ↓ or swipe down = duck');
   } else if (mode === 'dead') {
     panel(`swept away! score ${score}`, score >= best && score > 0 ? 'new best!! 🩷 — space to go again' : 'space or tap to try again');
   }
