@@ -28,27 +28,42 @@ const W = 800, H = 300, GROUND = 252;
 
 // ---------- state ----------
 let mode = 'start';            // start | play | dead
-let t = 0, speed = 3.6, dist = 0, score = 0, best = 0;
+let t = 0, speed = 4.4, dist = 0, score = 0, best = 0;
+
+const PALETTES = [
+  { name: 'rosy',     body: '#ffb1c8', belly: '#ffd4e0', limb: '#ff9fbe', gills: '#ff5c8a', smile: '#c2557d' },
+  { name: 'golden',   body: '#ffd88a', belly: '#ffefc4', limb: '#ffc76b', gills: '#ffb347', smile: '#b8802f' },
+  { name: 'lavender', body: '#c5b3ff', belly: '#e4dcff', limb: '#b39dff', gills: '#8f6bff', smile: '#6b4fc9' },
+  { name: 'mint',     body: '#9fe8c9', belly: '#d4f7e6', limb: '#82dbb6', gills: '#3ecf94', smile: '#2b8f68' },
+  { name: 'shadow',   body: '#565672', belly: '#7d7d99', limb: '#4a4a61', gills: '#ff5c8a', smile: '#2b2b3a' },
+];
+let palIdx = 0, swatches = [];
+try { palIdx = Math.min(PALETTES.length - 1, Math.max(0, +localStorage.getItem('axo-color') || 0)); } catch(e) {}
+function savePal() { try { localStorage.setItem('axo-color', palIdx); } catch(e) {} }
 try { best = +localStorage.getItem('axo-best') || 0; } catch(e) {}
 
 const axo = { x: 110, y: GROUND, vy: 0, w: 40, h: 58, duck: false };
 let obstacles = [], bubbles = [], nextSpawn = 0, duckTimer = null;
 
 function reset() {
-  t = 0; speed = 3.6; dist = 0; score = 0;
+  t = 0; speed = 4.4; dist = 0; score = 0;
   axo.y = GROUND; axo.vy = 0; axo.duck = false;
-  obstacles = []; nextSpawn = 120;
+  obstacles = []; nextSpawn = 110; swatches = [];
 }
 
 // ---------- input ----------
 function jump() {
   if (mode === 'start') { mode = 'play'; reset(); return; }
   if (mode === 'dead')  { mode = 'play'; reset(); return; }
-  if (axo.y >= GROUND - 0.5 && !axo.duck) axo.vy = -11.6;
+  if (axo.y >= GROUND - 0.5 && !axo.duck) axo.vy = -10.8;
 }
 addEventListener('keydown', e => {
   if (e.code === 'Space' || e.code === 'ArrowUp') { e.preventDefault(); jump(); }
   if (e.code === 'ArrowDown' || e.code === 'KeyS') { e.preventDefault(); if (axo.y >= GROUND - 0.5) axo.duck = true; }
+  if (/^Digit[1-5]$/.test(e.code)) {
+    const i = +e.code.slice(5) - 1;
+    if (i < PALETTES.length) { palIdx = i; savePal(); }
+  }
 });
 addEventListener('keyup', e => {
   if (e.code === 'ArrowDown' || e.code === 'KeyS') axo.duck = false;
@@ -60,6 +75,14 @@ cv.addEventListener('pointerup', e => {
   if (!pStart) return;
   const dy = e.clientY - pStart.y;
   pStart = null;
+  if (mode === 'start') {          // tap on a swatch selects a color instead of starting
+    const rect = cv.getBoundingClientRect();
+    const mx = (e.clientX - rect.left) * (W / rect.width);
+    const my = (e.clientY - rect.top) * (H / rect.height);
+    for (const s of swatches) {
+      if ((mx - s.x) ** 2 + (my - s.y) ** 2 < 22 * 22) { palIdx = s.i; savePal(); return; }
+    }
+  }
   if (dy > 25) {                       // swipe down → duck ~700ms
     if (axo.y >= GROUND - 0.5) {
       axo.duck = true;
@@ -73,7 +96,7 @@ cv.addEventListener('pointerup', e => {
 function spawn() {
   const late = score > 250 && Math.random() < 0.3;
   if (late) {              // jellyfish — head height with long tentacles: duck under it!
-    obstacles.push({ kind: 'jelly', x: W + 40, y: 148 + Math.random() * 10, r: 18, bob: Math.random() * 6 });
+    obstacles.push({ kind: 'jelly', x: W + 40, y: 118 + Math.random() * 8, r: 18, bob: Math.random() * 6 });
   } else {                 // coral cluster — starts small, grows as you score
     const grow = Math.min(1, score / 500);
     const h = 28 + Math.random() * 16 + grow * 18, w = 26 + Math.random() * 14 + grow * 14;
@@ -99,7 +122,7 @@ function hit() {
       const cx = Math.max(ax, Math.min(o.x, ax + aw)), cy = Math.max(ay, Math.min(jy, ay + ah));
       if ((cx - o.x) ** 2 + (cy - jy) ** 2 < 18 * 18) return true;
       // tentacles — column trailing below the bell
-      const tx = o.x - 12, tw = 24, ty = jy + 10, th = 62;
+      const tx = o.x - 12, tw = 24, ty = jy + 10, th = 96;
       if (ax < tx + tw && ax + aw > tx && ay < ty + th && ay + ah > ty) return true;
     }
   }
@@ -159,38 +182,38 @@ function drawBubbles() {
 function drawAxo() {
   const grounded = axo.y >= GROUND - 0.5;
   const wig = Math.sin(t / 3.2) * (grounded && mode === 'play' ? 1 : 0.4);
-  const x = axo.x, y = axo.y;
+  const x = axo.x, y = axo.y, p = PALETTES[palIdx];
   ctx.save(); ctx.translate(x, y);
   if (axo.duck && grounded) ctx.scale(1.2, 0.26);   // squish flat against the sand
 
   // tail — curls out behind at the base
   ctx.save(); ctx.translate(-12, -6); ctx.rotate(wig * 0.1);
-  ctx.fillStyle = '#ff9fbe';
+  ctx.fillStyle = p.limb;
   ctx.beginPath(); ctx.moveTo(0, -6);
   ctx.quadraticCurveTo(-26, -14 + wig * 3, -34, 2 + wig * 2);
   ctx.quadraticCurveTo(-24, 10, 0, 6); ctx.fill();
   ctx.restore();
 
   // feet (little run shuffle)
-  ctx.fillStyle = '#ff9fbe';
+  ctx.fillStyle = p.limb;
   rr(-15 + wig * 2, -9, 12, 9, 4);
   rr(3 - wig * 2, -9, 12, 9, 4);
   // body — upright capsule
-  ctx.fillStyle = '#ffb1c8';
+  ctx.fillStyle = p.body;
   rr(-17, -56, 34, 52, 16);
   // belly
-  ctx.fillStyle = '#ffd4e0';
+  ctx.fillStyle = p.belly;
   rr(-11, -37, 22, 29, 10);
   // arms — stubby, swinging
   ctx.save(); ctx.translate(-15, -40); ctx.rotate(-0.45 + wig * 0.12);
-  ctx.fillStyle = '#ff9fbe'; rr(-3, 0, 7, 15, 3.5); ctx.restore();
+  ctx.fillStyle = p.limb; rr(-3, 0, 7, 15, 3.5); ctx.restore();
   ctx.save(); ctx.translate(15, -40); ctx.rotate(0.45 - wig * 0.12);
-  ctx.fillStyle = '#ff9fbe'; rr(-4, 0, 7, 15, 3.5); ctx.restore();
+  ctx.fillStyle = p.limb; rr(-4, 0, 7, 15, 3.5); ctx.restore();
   // head
-  ctx.fillStyle = '#ffb1c8';
+  ctx.fillStyle = p.body;
   ctx.beginPath(); ctx.arc(2, -66, 19, 0, 7); ctx.fill();
   // gills — three fronds fanning from the back of the head, wiggling
-  ctx.fillStyle = '#ff5c8a';
+  ctx.fillStyle = p.gills;
   for (const [ang, len] of [[-1.5, 14], [-2.1, 17], [-2.7, 14]]) {
     ctx.save(); ctx.translate(-8, -76); ctx.rotate(ang + wig * 0.08);
     ctx.beginPath(); ctx.ellipse(len / 2 + 4, 0, len / 2 + 4, 4.2, 0, 0, 7); ctx.fill();
@@ -205,7 +228,7 @@ function drawAxo() {
   ctx.fillStyle = 'rgba(255,110,150,.55)';
   ctx.beginPath(); ctx.ellipse(13, -60, 5, 3, 0, 0, 7); ctx.fill();
   // smile
-  ctx.strokeStyle = '#c2557d'; ctx.lineWidth = 1.6;
+  ctx.strokeStyle = p.smile; ctx.lineWidth = 1.6;
   ctx.beginPath(); ctx.arc(15, -63, 5, 0.3, 1.6); ctx.stroke();
   ctx.restore();
 
@@ -232,7 +255,7 @@ function drawObstacles() {
       ctx.strokeStyle = 'rgba(190,150,255,.65)'; ctx.lineWidth = 3; ctx.lineCap = 'round';
       for (let i = -2; i <= 2; i++) {
         ctx.beginPath(); ctx.moveTo(i * 6, 8);
-        ctx.quadraticCurveTo(i * 6 + Math.sin(t / 9 + i) * 6, 45, i * 6 + Math.sin(t / 7 + i * 2) * 8, 80);
+        ctx.quadraticCurveTo(i * 6 + Math.sin(t / 9 + i) * 6, 55, i * 6 + Math.sin(t / 7 + i * 2) * 8, 102);
         ctx.stroke();
       }
       // bell
@@ -257,6 +280,28 @@ function ui() {
   ctx.textAlign = 'center';
   if (mode === 'start') {
     panel('🌊  axolotl run  🌊', 'space/tap = jump · ↓ or swipe down = duck');
+    // color picker
+    ctx.fillStyle = '#bfe3ff'; ctx.font = '500 13px "Segoe UI", sans-serif';
+    ctx.fillText('pick your axolotl — press 1-5 or click', W / 2, 209);
+    swatches = [];
+    for (let i = 0; i < PALETTES.length; i++) {
+      const sx = W / 2 + (i - (PALETTES.length - 1) / 2) * 48, sy = 231;
+      swatches.push({ x: sx, y: sy, i });
+      const P = PALETTES[i];
+      if (i === palIdx) {
+        ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2.5;
+        ctx.beginPath(); ctx.arc(sx, sy, 19, 0, 7); ctx.stroke();
+      }
+      ctx.fillStyle = P.gills;
+      for (const a of [-0.7, 0, 0.7]) {
+        ctx.save(); ctx.translate(sx + Math.sin(a) * 11, sy - 13 - Math.cos(a) * 4); ctx.rotate(a);
+        ctx.beginPath(); ctx.ellipse(0, 0, 3, 7, 0, 0, 7); ctx.fill(); ctx.restore();
+      }
+      ctx.fillStyle = P.body;
+      ctx.beginPath(); ctx.arc(sx, sy, 14, 0, 7); ctx.fill();
+      ctx.fillStyle = '#2b2b3a';
+      ctx.beginPath(); ctx.arc(sx - 4.5, sy - 2, 1.9, 0, 7); ctx.arc(sx + 4.5, sy - 2, 1.9, 0, 7); ctx.fill();
+    }
   } else if (mode === 'dead') {
     panel(`swept away! score ${score}`, score >= best && score > 0 ? 'new best!! 🩷 — space to go again' : 'space or tap to try again');
   }
@@ -276,10 +321,10 @@ function step() {
   bg(); drawBubbles();
 
   if (mode === 'play') {
-    speed = Math.min(9.5, speed + 0.0008);
+    speed = Math.min(9, speed + 0.0007);
     dist += speed; score = Math.floor(dist / 10);
 
-    axo.vy += 0.55; axo.y = Math.min(GROUND, axo.y + axo.vy);
+    axo.vy += 0.42; axo.y = Math.min(GROUND, axo.y + axo.vy);   // low gravity = long floaty arcs
     if (axo.y >= GROUND) axo.vy = 0;
 
     if (--nextSpawn <= 0) spawn();
